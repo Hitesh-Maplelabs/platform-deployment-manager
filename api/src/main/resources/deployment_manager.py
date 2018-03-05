@@ -118,19 +118,12 @@ class DeploymentManager(object):
 
         return ret
 
-    def _run_asynch_package_task(self, package_name, initial_state, working_state, task):
+    def _run_asynch_package_task(self, package_name, task):
         """
-        Manages locks and state reporting for async background operations on packages
+        Aynchronously performs an operation on a package
         :param package_name: The name of the package to operate on
-        :param initial_state: The state to check before beginning work on the package
-        :param working_state: The state to set while the package operation is being carried out.
         :param task: The actual work to be carried out
         """
-        with self._lock:
-            # check that package is in the right state before starting operation:
-            self._assert_package_status(package_name, initial_state)
-            # set the operation state before starting:
-            self._set_package_progress(package_name, working_state)
 
         # this will be run in the background while taking care to release all locks and intermediate states:
         def do_work_and_report_progress():
@@ -177,11 +170,14 @@ class DeploymentManager(object):
                 if package_data_path is not None:
                     os.remove(package_data_path)
 
+        with self._lock:
+            # check that package is in the right state before starting operation:
+            self._assert_package_status(package, PackageDeploymentState.NOTDEPLOYED)
+            # set the operation state before starting:
+            self._set_package_progress(package, PackageDeploymentState.DEPLOYING)
+
         # schedule work to be done in the background:
-        self._run_asynch_package_task(package_name=package,
-                                      initial_state=PackageDeploymentState.NOTDEPLOYED,
-                                      working_state=PackageDeploymentState.DEPLOYING,
-                                      task=_do_deploy)
+        self._run_asynch_package_task(package_name=package, task=_do_deploy)
 
     def utc_string(self):
         return datetime.datetime.utcnow().isoformat()
@@ -207,11 +203,14 @@ class DeploymentManager(object):
                     # persist any errors in the database, but still throw them:
                     self._package_registrar.set_package_deploy_status(package, deploy_status)
 
+        with self._lock:
+            # check that package is in the right state before starting operation:
+            self._assert_package_status(package, PackageDeploymentState.DEPLOYED)
+            # set the operation state before starting:
+            self._set_package_progress(package, PackageDeploymentState.UNDEPLOYING)
+
         # schedule work to be done in the background:
-        self._run_asynch_package_task(package_name=package,
-                                      initial_state=PackageDeploymentState.DEPLOYED,
-                                      working_state=PackageDeploymentState.UNDEPLOYING,
-                                      task=do_undeploy)
+        self._run_asynch_package_task(package_name=package, task=do_undeploy)
 
     def _set_package_progress(self, package_name, state):
         """
@@ -246,17 +245,17 @@ class DeploymentManager(object):
         with self._lock:
             self._package_progress.pop(package, None)
 
-    def _mark_destroying(self, package):
-        self._set_package_progress(package, ApplicationState.DESTROYING)
+    def _mark_destroying(self, application):
+        self._set_package_progress(application, ApplicationState.DESTROYING)
 
-    def _mark_creating(self, package):
-        self._set_package_progress(package, ApplicationState.CREATING)
+    def _mark_creating(self, application):
+        self._set_package_progress(application, ApplicationState.CREATING)
 
-    def _mark_starting(self, package):
-        self._set_package_progress(package, ApplicationState.STARTING)
+    def _mark_starting(self, application):
+        self._set_package_progress(application, ApplicationState.STARTING)
 
-    def _mark_stopping(self, package):
-        self._set_package_progress(package, ApplicationState.STOPPING)
+    def _mark_stopping(self, application):
+        self._set_package_progress(application, ApplicationState.STOPPING)
 
     def list_package_applications(self, package):
         logging.info('list_package_applications')
